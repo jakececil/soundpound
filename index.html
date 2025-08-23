@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AetherViz — NOVA</title>
+<style>
+  :root { --bg:#000; --fg:#eaeaea; --accent:#8ef; }
+  html, body { margin:0; padding:0; height:100%; background:#000; color:var(--fg);
+    font-family:system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; overflow:hidden; }
+  #webgl { position:fixed; inset:0; width:100vw; height:100vh; display:block; background:#000; }
+  #ui {
+    position: fixed; top: 12px; left: 12px; width: min(640px, 92vw);
+    max-height: calc(100vh - 24px); overflow: auto;
+    background: rgba(18,18,18,0.92); border:1px solid #222; border-radius:12px;
+    padding:12px; backdrop-filter: blur(8px); box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+  }
+  #ui h1 { margin:0 0 10px 0; font-size:16px; letter-spacing:0.4px; font-weight:600; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
+  .row { display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; margin:6px 0; }
+  .row > *:last-child { width: 230px; }
+  .full { grid-column: 1 / -1; }
+  button, label.file-btn {
+    border:1px solid #2a2a2a; background:#141414; color:var(--fg);
+    border-radius:8px; padding:8px 10px; font-size:13px; cursor:pointer;
+    transition: transform .05s ease, background .15s ease, border-color .15s ease; text-align:center;
+    width:100%;
+  }
+  button:hover, label.file-btn:hover { background:#181818; border-color:#333; }
+  button:active, label.file-btn:active { transform: translateY(1px); }
+  input[type="file"] { display:none; }
+  input[type="range"] { accent-color: var(--accent); width:100%; }
+  select { width:100%; }
+  input[type="color"] { width: 36px; height: 24px; border:1px solid #333; border-radius:6px; background:#111; padding:0; }
+  .sep { height:1px; background:#202020; margin:8px 0; }
+  .tiny { font-size:11px; color:#9aa; line-height:1.25; }
+  #footer { display:flex; gap:8px; justify-content:space-between; align-items:center; margin-top:8px; }
+  #toggle { border:1px solid #2a2a2a; background:#101010; border-radius:8px; padding:6px 8px; font-size:12px; cursor:pointer; color:#bbb; }
+  #status { font-size:11px; color:#9ad; max-width:50vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #hidden { position:fixed; bottom:12px; left:12px; font-size:12px; color:#777; background:rgba(18,18,18,0.62); padding:6px 8px; border-radius:8px; border:1px solid #222; display:none; }
+  .caps { text-transform: uppercase; font-size:11px; color:#aaa; letter-spacing:0.08em; }
+
+  /* Layer toggle buttons */
+  .tbar { display:flex; flex-wrap:wrap; gap:6px; }
+  .tbtn {
+    padding:6px 10px; border-radius:8px; border:1px solid #2a2a2a; background:#131313; color:#bbb;
+    font-size:12px; cursor:pointer; user-select:none; outline:none;
+  }
+  .tbtn.active { background:#1d2630; color:#eaf6ff; border-color:#2b3b4d; box-shadow: inset 0 0 0 1px #2b3b4d; }
+</style>
+</head>
+<body>
+<canvas id="webgl"></canvas>
+
+<div id="ui">
+  <h1>🎧 AetherViz — NOVA</h1>
+
+  <div class="grid">
+    <button id="btnMic">🎙️ Mic / Loopback</button>
+    <button id="btnTab">🪟 Capture Tab Audio</button>
+    <label class="file-btn" for="file">📁 Load Audio File</label>
+    <button id="btnTone">🧪 Test Tone</button>
+    <input id="file" type="file" accept="audio/*" />
+  </div>
+
+  <div class="grid">
+    <div class="row"><span>Preset</span>
+      <select id="preset">
+        <option value="kaleido">Kaleidoscope</option>
+        <option value="bands">Distinct Bands</option>
+        <option value="sprites">Photon Sprites</option>
+        <option value="flecks">Flecks</option>
+        <option value="shapes">Shapes</option>
+        <option value="bars">Bars</option>
+        <option value="sunburst">Sunburst</option>
+        <option value="osc">Wave Tunnel</option>
+        <option value="mix">Everything</option>
+      </select>
+    </div>
+    <div class="row"><span>Sensitivity</span><input id="gain" type="range" min="0" max="5" step="0.01" value="1.4" /></div>
+    <div class="row"><span>Smoothing</span><input id="smoothing" type="range" min="0" max="0.95" step="0.01" value="0.72" /></div>
+    <div class="row"><span>FFT Size</span>
+      <select id="fft"><option>512</option><option selected>1024</option><option>2048</option><option>4096</option><option>8192</option></select>
+    </div>
+    <div class="row"><span>Glow</span><input id="glow" type="range" min="0" max="12" step="0.5" value="4" /></div>
+    <div class="row"><span>Bars</span><input id="bars" type="range" min="8" max="256" step="1" value="140" /></div>
+    <div class="row"><span>BG</span><select id="bgmode"><option value="black">Black</option><option value="gradient" selected>Gradient</option><option value="plasma">Plasma</option></select></div>
+  </div>
+
+  <div class="sep"></div>
+  <div class="grid">
+    <div class="row"><span>Segments</span><input id="segments" type="range" min="4" max="24" step="1" value="16" /></div>
+    <div class="row"><span>Kaleido Amt</span><input id="kAmt" type="range" min="0" max="1" step="0.01" value="0.9" /></div>
+    <div class="row"><span>Rotation</span><input id="kRot" type="range" min="-2" max="2" step="0.01" value="0.2" /></div>
+    <div class="row"><span>Warp</span><input id="kWarp" type="range" min="0" max="1.2" step="0.01" value="0.55" /></div>
+  </div>
+
+  <div class="sep"></div>
+  <div class="grid full">
+    <div class="row"><span>Auto Cycle</span><select id="auto"><option value="on" selected>On</option><option value="off">Off</option></select></div>
+    <div class="row"><span>Period (sec)</span><input id="period" type="range" min="0.25" max="120" step="0.05" value="28" /></div>
+    <div class="row"><span>Palette (Global)</span>
+      <select id="palette">
+        <option value="neon">Neon</option><option value="fire">Fire</option><option value="ocean">Ocean</option>
+        <option value="pastel">Pastel</option><option value="glacier">Glacier</option>
+        <option value="random">Randomize</option><option value="custom">Custom</option>
+      </select>
+    </div>
+    <div class="row"><span>Custom C1</span><input id="c1" type="color" value="#83fff7" /></div>
+    <div class="row"><span>Custom C2</span><input id="c2" type="color" value="#ff66e0" /></div>
+    <div class="row"><span>Custom C3</span><input id="c3" type="color" value="#ffd84a" /></div>
+  </div>
+
+  <div class="sep"></div>
+  <div class="grid full">
+    <div class="caps full">Layer Mode</div>
+    <div class="tbar" id="tbar">
+      <button class="tbtn active" data-layer="sprites" aria-pressed="true">Sprites</button>
+      <button class="tbtn active" data-layer="halo" aria-pressed="true">Halo</button>
+      <button class="tbtn active" data-layer="osc" aria-pressed="true">Osc</button>
+      <button class="tbtn" data-layer="bars" aria-pressed="false">Bars</button>
+      <button class="tbtn" data-layer="sun" aria-pressed="false">Sunburst</button>
+      <button class="tbtn active" data-layer="bands" aria-pressed="true">Bands</button>
+      <button class="tbtn active" data-layer="flecks" aria-pressed="true">Flecks</button>
+      <button class="tbtn active" data-layer="shapes" aria-pressed="true">Shapes</button>
+      <button class="tbtn active" data-layer="kaleido" aria-pressed="true">Kaleido</button>
+    </div>
+  </div>
+
+  <div class="sep"></div>
+  <div class="grid">
+    <div class="caps full">Per-layer palettes</div>
+    <div class="row"><span>Sprites</span><select id="palSprites"></select></div>
+    <div class="row"><span>Flecks</span><select id="palFlecks"></select></div>
+    <div class="row"><span>Shapes</span><select id="palShapes"></select></div>
+    <div class="row"><span>Bars</span><select id="palBars"></select></div>
+    <div class="row"><span>Rays (Halo/Sunburst/Osc)</span><select id="palRays"></select></div>
+  </div>
+
+  <div class="sep"></div>
+  <div class="grid">
+    <div class="caps full">Population & Scale</div>
+    <div class="row"><span>Population Budget (%)</span><input id="budget" type="range" min="5" max="200" step="1" value="100" /></div>
+    <div class="row"><span>Particles Count</span><input id="particlesCount" type="range" min="0" max="2500" step="10" value="900" /></div>
+    <div class="row"><span>Flecks Count</span><input id="flecksCount" type="range" min="0" max="1400" step="10" value="700" /></div>
+    <div class="row"><span>Shapes Rate</span><input id="shapesRate" type="range" min="0" max="20" step="0.1" value="4.0" /></div>
+    <div class="row"><span>Sprite Scale Jitter</span><input id="jitSprites" type="range" min="0" max="2" step="0.01" value="0.6" /></div>
+    <div class="row"><span>Fleck Scale Jitter</span><input id="jitFlecks" type="range" min="0" max="2" step="0.01" value="0.5" /></div>
+    <div class="row"><span>Shape Scale Jitter</span><input id="jitShapes" type="range" min="0" max="2" step="0.01" value="0.8" /></div>
+    <div class="row"><span>Global Scale Drift</span><input id="drift" type="range" min="0" max="2" step="0.01" value="0.4" /></div>
+  </div>
+
+  <div class="sep"></div>
+  <div class="grid">
+    <div class="caps full">Shader Overlay</div>
+    <div class="row"><span>Lens Warp</span><input id="lensAmt" type="range" min="0" max="1.5" step="0.01" value="0.6" /></div>
+    <div class="row"><span>Ripple</span><input id="rippleAmt" type="range" min="0" max="2" step="0.01" value="0.6" /></div>
+    <div class="row"><span>Liquid</span><input id="liquidAmt" type="range" min="0" max="2" step="0.01" value="0.7" /></div>
+    <div class="row"><span>Safe Margin</span><input id="safeMargin" type="range" min="0" max="0.5" step="0.01" value="0.08" /></div>
+  </div>
+
+  <div class="sep"></div>
+  <div class="tiny">Press <b>H</b> to hide UI. Auto-cycle randomizes palette each period (0.25s–120s). Beats: kicks ⭐, snares splats. If tab capture fails, make sure “Share this tab’s audio” is enabled after picking the tab.</div>
+  <div id="footer">
+    <button id="toggle">▣ Hide</button>
+    <div id="status">Idle</div>
+  </div>
+</div>
+<div id="hidden">Controls hidden — press H to toggle.</div>
+
+<!-- hidden video sink for displayMedia -->
+<video id="sink" autoplay muted playsinline style="display:none"></video>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const webgl = $('webgl'), sink=$('sink');
+  let W=0,H=0,DPR=Math.max(1, Math.min(window.devicePixelRatio||1, 2));
+  const scene = document.createElement('canvas');
+  const sctx  = scene.getContext('2d');
+
+  let audio=null, master=null, srcNode=null, currentStream=null, anA=null, anB=null, anC=null, freqA, freqB, freqC, timeData;
+  let playing=false;
+
+  // UI refs
+  const preset=$('preset'), gain=$('gain'), smooth=$('smoothing'), fftSel=$('fft'), glow=$('glow'), barsSlide=$('bars');
+  const bgmode=$('bgmode');
+  const segments=$('segments'), kAmt=$('kAmt'), kRot=$('kRot'), kWarp=$('kWarp');
+  const auto=$('auto'), period=$('period'), status=$('status'), ui=$('ui'), toggle=$('toggle'), hidden=$('hidden');
+  const paletteSel=$('palette'), c1=$('c1'), c2=$('c2'), c3=$('c3');
+  const palSprites=$('palSprites'), palFlecks=$('palFlecks'), palShapes=$('palShapes'), palBars=$('palBars'), palRays=$('palRays');
+  const particlesCount=$('particlesCount'), flecksCount=$('flecksCount'), shapesRate=$('shapesRate'), budget=$('budget');
+  const jitSprites=$('jitSprites'), jitFlecks=$('jitFlecks'), jitShapes=$('jitShapes'), drift=$('drift');
+  const lensAmt=$('lensAmt'), rippleAmt=$('rippleAmt'), liquidAmt=$('liquidAmt'), safeMargin=$('safeMargin');
+
+  // Layer toggles
+  const layers = { sprites:true, halo:true, osc:true, bars:false, sun:false, bands:true, flecks:true, shapes:true, kaleido:true };
+  const tbar = $('tbar');
+  function syncButtons(){
+    [...tbar.querySelectorAll('.tbtn')].forEach(btn=>{
+      const k = btn.dataset.layer; const on = !!layers[k];
+      btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', on? 'true':'false');
+    });
+  }
+  tbar.addEventListener('click', e=>{
+    const b = e.target.closest('.tbtn'); if(!b) return;
+    const key = b.dataset.layer; layers[key] = !layers[key]; syncButtons();
+    status.textContent = 'Layer ' + key + (layers[key]?' ON':' OFF');
+  });
+  syncButtons();
+
+  // Palettes
+  const paletteOptions = ['inherit','neon','fire','ocean','pastel','glacier','random','custom'];
+  function fillLayerPal(sel){ paletteOptions.forEach(o => { const op=document.createElement('option'); op.value=o; op.textContent=o; sel.appendChild(op); }); sel.value='inherit'; }
+  [palSprites,palFlecks,palShapes,palBars,palRays].forEach(fillLayerPal);
+
+  function hexToHsl(hex){
+    hex = hex.replace('#',''); if (hex.length===3) hex = hex.split('').map(x=>x+x).join('');
+    const r = parseInt(hex.substr(0,2),16)/255, g = parseInt(hex.substr(2,2),16)/255, b = parseInt(hex.substr(4,2),16)/255;
+    const max = Math.max(r,g,b), min = Math.min(r,g,b); let h, s, l=(max+min)/2;
+    if (max===min){ h=0; s=0; } else { const d = max-min; s = l>0.5 ? d/(2-max-min) : d/(max+min);
+      switch(max){ case r: h=(g-b)/d + (g<b?6:0); break; case g: h=(b-r)/d + 2; break; case b: h=(r-g)/d + 4; break; } h/=6; }
+    return [h*360, s*100, l*100];
+  }
+  function makePalette(kind){
+    if (kind==='random') return { mode:'random' };
+    if (kind==='custom') return { mode:'custom', stops:[hexToHsl(c1.value), hexToHsl(c2.value), hexToHsl(c3.value)] };
+    const maps={
+      neon:[[180,255,255],[210,255,200],[270,255,255],[320,255,220],[140,255,255]],
+      fire:[[10,255,220],[30,255,255],[0,255,180],[55,200,255],[12,255,150]],
+      ocean:[[180,120,255],[200,180,255],[160,220,255],[220,180,220],[190,220,255]],
+      pastel:[[300,80,255],[200,80,255],[120,80,255],[20,80,255],[260,80,255]],
+      glacier:[[190,60,255],[210,80,255],[230,100,255],[170,70,255],[200,60,200]],
+    };
+    return { mode:kind, stops: maps[kind] || maps.neon };
+  }
+  let globalPal = makePalette(paletteSel.value);
+  paletteSel.addEventListener('change', ()=> globalPal = makePalette(paletteSel.value) );
+  [c1,c2,c3].forEach(inp=> inp.addEventListener('input', ()=> { if (paletteSel.value==='custom') globalPal = makePalette('custom'); }));
+
+  function colorFor(layer, t){
+    const sel = {sprites:palSprites, flecks:palFlecks, shapes:palShapes, bars:palBars, rays:palRays}[layer];
+    const choice = sel.value; const pal = (choice==='inherit') ? globalPal : makePalette(choice);
+    if (pal.mode==='random'){ const h=(performance.now()*0.03 + Math.random()*360)%360; return `hsl(${h}deg 90% 60%)`; }
+    const a=pal.stops; const p=t*(a.length-1); const i=Math.floor(p), f=p-i; const c1_=a[i], c2_=a[Math.min(i+1,a.length-1)];
+    const h=c1_[0]+(c2_[0]-c1_[0])*f, s=c1_[1]+(c2_[1]-c1_[1])*f, l=c1_[2]+(c2_[2]-c1_[2])*f;
+    return `hsl(${h}deg ${Math.min(100, s/2.55)}% ${Math.min(100, l/2.55)}%)`;
+  }
+
+  // Resize
+  const gl = webgl.getContext('webgl');
+  function doResize(){
+    W = webgl.clientWidth; H = webgl.clientHeight;
+    webgl.width = Math.floor(W * DPR); webgl.height = Math.floor(H * DPR);
+    scene.width = W; scene.height = H; sctx.setTransform(1,0,0,1,0,0);
+    gl.viewport(0,0,gl.drawingBufferWidth, gl.drawingBufferHeight);
+  }
+  window.addEventListener('resize', doResize);
+
+  // Audio
+  function ensureAudio(){
+    if (!audio){
+      audio = new (window.AudioContext||window.webkitAudioContext)();
+      master = audio.createGain(); master.gain.value=0.0; master.connect(audio.destination);
+      setupAnalysers(1024);
+    }
+    if (audio.state==='suspended') audio.resume();
+  }
+  function setupAnalysers(fft){
+    const mk = (fs, sm) => { const a = audio.createAnalyser(); a.fftSize=fs; a.smoothingTimeConstant=sm; return a; };
+    anA = mk(fft, parseFloat(smooth.value));
+    anB = mk(Math.min(8192, fft*2), 0.25);
+    anC = mk(Math.max(512,  fft/2), 0.9);
+    freqA = new Uint8Array(anA.frequencyBinCount);
+    freqB = new Uint8Array(anB.frequencyBinCount);
+    freqC = new Uint8Array(anC.frequencyBinCount);
+    timeData = new Uint8Array(anA.fftSize);
+  }
+  function setSourceNode(node, stream){
+    if (srcNode){ try{ srcNode.disconnect(); }catch(e){} }
+    if (currentStream){ try{ currentStream.getTracks().forEach(t=>t.stop()); }catch(e){} }
+    srcNode = node; currentStream = stream || null;
+    const tee = audio.createGain(); tee.gain.value=1.0;
+    node.connect(tee);
+    tee.connect(anA); tee.connect(anB); tee.connect(anC);
+  }
+  function setStatus(t){ status.textContent=t; }
+
+  // Buttons
+  $('btnMic').addEventListener('click', async()=>{
+    try{
+      ensureAudio();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }, video:false });
+      const node = audio.createMediaStreamSource(stream);
+      setSourceNode(node, stream);
+      playing=true; setStatus('Mic/Loopback capturing…');
+    }catch(e){ setStatus('Mic/Loopback failed: '+e.message); }
+  });
+
+  $('btnTab').addEventListener('click', async()=>{
+    ensureAudio();
+    async function tryGet(constraints){
+      try { return await navigator.mediaDevices.getDisplayMedia(constraints); } catch(e){ return null; }
+    }
+    const attempts = [
+      { video:{ displaySurface:'browser', width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:30}}, audio:true },
+      { video:true, audio:{ selfBrowserSurface:'include', suppressLocalAudioPlayback:false, systemAudio:'include'} },
+      { video:true, audio:true }
+    ];
+    let stream=null;
+    for (const c of attempts){ stream = await tryGet(c); if (stream) break; }
+    if (!stream){ setStatus('Tab capture failed: permission denied or no audio track.'); return; }
+    sink.srcObject = stream; // keep alive
+    try{ await sink.play(); }catch{}
+    const hasAudio = stream.getAudioTracks().length>0;
+    if (!hasAudio){ setStatus('Captured display but no audio. Enable "Share this tab\'s audio".'); }
+    const node = audio.createMediaStreamSource(stream);
+    setSourceNode(node, stream);
+    playing=true; setStatus('Tab audio capturing…');
+  });
+
+  $('btnTone').addEventListener('click', ()=>{
+    ensureAudio();
+    const osc = audio.createOscillator(); const g = audio.createGain(); osc.type='sawtooth'; osc.frequency.value=120; g.gain.value=0.2; osc.connect(g).connect(master);
+    const tee = audio.createGain(); g.connect(tee); setSourceNode(tee, null);
+    osc.start(); let f=120, dir=1; const sweep=setInterval(()=>{ f += dir*20; if (f>1200) dir=-1; if (f<80) dir=1; osc.frequency.linearRampToValueAtTime(f, audio.currentTime+0.18); },200);
+    srcNode._cleanup=()=>{ try{osc.stop();osc.disconnect();}catch{} clearInterval(sweep); };
+    playing=true; setStatus('Test tone running…');
+  });
+
+  $('file').addEventListener('change', async (e)=>{
+    const f=e.target.files[0]; if(!f) return; ensureAudio(); setStatus('Loading file…');
+    const buf = await f.arrayBuffer(); const ab = await audio.decodeAudioData(buf);
+    const bs = audio.createBufferSource(); bs.buffer=ab; bs.loop=true;
+    const g = audio.createGain(); g.gain.value=0.6; bs.connect(g).connect(master);
+    const tee = audio.createGain(); g.connect(tee); setSourceNode(tee, null); bs.start();
+    srcNode._cleanup=()=>{ try{bs.stop();bs.disconnect();}catch{} };
+    playing=true; setStatus('Playing: '+(f.name||'file'));
+  });
+
+  // WebGL post shader (safe margin + distortions)
+  const vs = `
+    attribute vec2 a_pos;
+    varying vec2 v_uv;
+    void main(){ v_uv = (a_pos+1.0)*0.5; gl_Position = vec4(a_pos,0.,1.); }
+  `;
+  const fs = `
+    precision mediump float;
+    varying vec2 v_uv;
+    uniform sampler2D u_tex;
+    uniform float u_time;
+    uniform float u_lens, u_ripple, u_liquid, u_safe;
+    uniform float u_low, u_mid, u_high;
+
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+    float noise(vec2 p){
+      vec2 i = floor(p), f = fract(p);
+      float a = hash(i), b = hash(i+vec2(1.0,0.0)), c = hash(i+vec2(0.0,1.0)), d = hash(i+vec2(1.0,1.0));
+      vec2 u = f*f*(3.0-2.0*f);
+      return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
+    }
+
+    void main(){
+      vec2 center = vec2(0.5);
+      vec2 uv = v_uv;
+
+      float zoom = 1.0 + u_lens * 0.25 + u_safe;
+      uv = center + (uv - center) / zoom;
+
+      vec2 d = uv - center;
+      float r = length(d);
+
+      float lensAmt = u_lens * (0.6 + 0.4*u_low);
+      float lens = r * (1.0 + lensAmt * (r*r));
+      vec2 uv1 = center + normalize(d) * lens;
+
+      float rip = sin( (r*20.0 - u_time*2.0) ) * 0.002 * u_ripple * (0.6+u_mid);
+      uv1 += normalize(d) * rip;
+
+      float n = noise(uv*vec2(6.0) + u_time*0.5);
+      float n2= noise(uv*vec2(10.0) - u_time*0.8);
+      vec2 disp = (vec2(n-0.5, n2-0.5)) * 0.02 * u_liquid * (0.7+u_high);
+      uv1 += disp;
+
+      uv1 = clamp(uv1, vec2(0.001), vec2(0.999));
+      gl_FragColor = texture2D(u_tex, uv1);
+    }
+  `;
+  function compileShader(type, src){ const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); } return s; }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, vs));
+  gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const a_pos = gl.getAttribLocation(prog, "a_pos");
+  gl.enableVertexAttribArray(a_pos);
+  gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
+  const u_tex = gl.getUniformLocation(prog, "u_tex");
+  const u_time = gl.getUniformLocation(prog, "u_time");
+  const u_lens = gl.getUniformLocation(prog, "u_lens");
+  const u_ripple = gl.getUniformLocation(prog, "u_ripple");
+  const u_liquid = gl.getUniformLocation(prog, "u_liquid");
+  const u_safe = gl.getUniformLocation(prog, "u_safe");
+  const u_low = gl.getUniformLocation(prog, "u_low");
+  const u_mid = gl.getUniformLocation(prog, "u_mid");
+  const u_high= gl.getUniformLocation(prog, "u_high");
+
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+  // Visual state
+  let parts=[], flecks=[], shapes=[];
+  function newParticle(){ return { x:Math.random()*W, y:Math.random()*H, z:Math.random()*1.0, vx:(Math.random()-0.5)*0.6, vy:(Math.random()-0.5)*0.6, life:0, max:240+Math.random()*360, size:1+Math.random()*2, hue:Math.random() }; }
+  function newFleck(){
+    const sides = 3 + Math.floor(Math.random()*5), pts=[], baseR = 1 + Math.random()*3;
+    for (let i=0;i<sides;i++){ const a=(i/sides)*Math.PI*2; const r = baseR*(0.7+Math.random()*0.6); pts.push({x:Math.cos(a)*r, y:Math.sin(a)*r}); }
+    return { x:Math.random()*W, y:Math.random()*H, z:Math.random()*1.0, vx:(Math.random()-0.5)*1.2, vy:(Math.random()-0.5)*1.2, rot:Math.random()*Math.PI*2, vr:(Math.random()-0.5)*0.04, pts, life:0, max:600+Math.random()*600, hue:Math.random() };
+  }
+  function spawnShape(type){
+    const scale = 0.6 + Math.random()*1.8, x = Math.random()*W, y = Math.random()*H;
+    const vx = (Math.random()-0.5)* 1.5, vy = (Math.random()-0.5)* 1.5;
+    const z = Math.random()*1.0, rot = Math.random()*Math.PI*2, vr=(Math.random()-0.5)*0.03;
+    const max = 160 + Math.random()*260, hue = Math.random();
+    shapes.push({type,x,y,z,vx,vy,rot,vr,scale,life:0,max,hue});
+  }
+  function initCounts(){
+    const mult = parseInt(budget.value,10)/100;
+    parts = []; for (let i=0;i<Math.floor(parseInt(particlesCount.value,10)*mult); i++) parts.push(newParticle());
+    flecks = []; for (let i=0;i<Math.floor(parseInt(flecksCount.value,10)*mult); i++) flecks.push(newFleck());
+    shapes = [];
+  }
+  initCounts();
+  [particlesCount,flecksCount,budget].forEach(inp=> inp.addEventListener('input', initCounts));
+
+  // Helpers
+  function clampf(v,a,b){ return Math.max(a, Math.min(b,v)); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function mapLogIndex(i, n, minHz=20, maxHz=20000, sampleRate=44100){
+    const minLog=Math.log10(minHz), maxLog=Math.log10(maxHz), frac=i/(n-1);
+    const hz=Math.pow(10, lerp(minLog, maxLog, frac));
+    const bin = Math.round(hz / (sampleRate/2) * (anB.frequencyBinCount-1));
+    return clampf(bin, 0, anB.frequencyBinCount-1);
+  }
+  function bandEnergy(band){
+    const arr = band==='high'?freqB:(band==='low'?freqC:freqA);
+    const len=arr.length; let s=0,n=0;
+    const a= band==='low'?0.02:(band==='mid'?0.12:0.35);
+    const b= band==='low'?0.10:(band==='mid'?0.45:0.98);
+    const i0=Math.floor(len*a), i1=Math.floor(len*b);
+    for (let i=i0;i<i1;i++){ s+=arr[i]; n++; }
+    return n>0? (s/n)/255 : 0;
+  }
+
+  // BG
+  let bgPhase=0;
+  function drawBG(ctx2){
+    const mode = bgmode.value;
+    if (mode==='black'){ ctx2.fillStyle='#000'; ctx2.fillRect(0,0,W,H); return; }
+    if (mode==='gradient'){
+      const g = ctx2.createRadialGradient(W*0.5, H*0.6, Math.min(W,H)*0.05, W*0.5, H*0.6, Math.max(W,H)*1.2);
+      g.addColorStop(0,'#04070f'); g.addColorStop(1,'#000'); ctx2.fillStyle=g; ctx2.fillRect(0,0,W,H); return;
+    }
+    bgPhase += 0.003;
+    const img = ctx2.createImageData(W,H), data=img.data;
+    for (let y=0;y<H;y++){
+      for (let x=0;x<W;x++){
+        const i=(y*W+x)*4;
+        const v = Math.sin(x*0.01 + bgPhase) + Math.sin(y*0.013 - bgPhase*1.3);
+        const c = Math.floor((v*0.5 + 0.5)*30);
+        data[i]=c; data[i+1]=c; data[i+2]=c; data[i+3]=255;
+      }
+    }
+    ctx2.putImageData(img,0,0);
+  }
+
+  // Drift
+  let driftPhase=0;
+  function driftScale(){ driftPhase += 0.002; return 1.0 + Math.sin(driftPhase)*parseFloat(drift.value)*0.2; }
+
+  // Layers
+  function drawBars(ctx2){
+    const bars=parseInt(barsSlide.value,10), g=parseFloat(gain.value), midY=H/2;
+    ctx2.save(); ctx2.translate(0,midY);
+    for (let i=0;i<bars;i++){
+      const ix=mapLogIndex(i,bars), v=(freqA[ix]/255)*g, h=v*H*0.45, x=(i+0.5)/bars*W, t=i/(bars-1);
+      ctx2.fillStyle=colorFor('bars', t);
+      const sc = driftScale();
+      ctx2.fillRect(x-(W/bars)*0.45, -h*sc, (W/bars)*0.9, h*sc);
+      ctx2.fillRect(x-(W/bars)*0.45, 0, (W/bars)*0.9, h*sc);
+    }
+    ctx2.restore();
+  }
+  function drawOsc(ctx2){
+    const g=parseFloat(gain.value); anA.getByteTimeDomainData(timeData);
+    ctx2.save(); ctx2.globalCompositeOperation='screen'; ctx2.lineWidth=2;
+    const sc = driftScale();
+    ctx2.beginPath();
+    for (let i=0;i<timeData.length;i++){
+      const t=i/(timeData.length-1), x=t*W, v=(timeData[i]-128)/128, y=H/2 + v*(H*0.35)*g*sc;
+      if(i===0) ctx2.moveTo(x,y); else ctx2.lineTo(x,y);
+    }
+    ctx2.strokeStyle=colorFor('rays', (performance.now()*0.0002)%1); ctx2.stroke(); ctx2.restore();
+  }
+  function drawHalo(ctx2){
+    const cx=W/2, cy=H/2, R=Math.min(W,H)*0.33, bars=parseInt(barsSlide.value,10), g=parseFloat(gain.value);
+    const sc = driftScale();
+    ctx2.save(); ctx2.translate(cx,cy); ctx2.scale(sc,sc); ctx2.lineCap='round';
+    for (let i=0;i<bars;i++){
+      const a=(i/bars)*Math.PI*2, ix=mapLogIndex(i,bars);
+      const vH=freqB[ix]/255, vL=freqC[Math.floor(ix*(freqC.length/freqB.length))]/255;
+      const mag=(vH*0.8+vL*0.6)*g, r0=R*0.5, r1=R*(0.9+mag*0.9);
+      const x0=Math.cos(a)*r0, y0=Math.sin(a)*r0, x1=Math.cos(a)*r1, y1=Math.sin(a)*r1;
+      const t=i/(bars-1); ctx2.strokeStyle=colorFor('rays', t); ctx2.lineWidth=2.2+vH*6;
+      ctx2.beginPath(); ctx2.moveTo(x0,y0); ctx2.lineTo(x1,y1); ctx2.stroke();
+    }
+    ctx2.restore();
+  }
+  function drawSunburst(ctx2){
+    const bars=parseInt(barsSlide.value,10), g=parseFloat(gain.value), cx=W/2, cy=H*0.65, maxR=Math.max(W,H)*0.9*driftScale();
+    ctx2.save(); ctx2.translate(cx,cy);
+    for (let i=0;i<bars;i++){
+      const a=(i/bars)*Math.PI*2, ix=mapLogIndex(i,bars), v=(freqB[ix]/255)*g, r=v*maxR, x1=Math.cos(a)*r, y1=Math.sin(a)*r, t=i/(bars-1);
+      ctx2.strokeStyle=colorFor('rays', t); ctx2.globalAlpha=0.5+v*0.7; ctx2.lineWidth=1.5+v*6;
+      ctx2.beginPath(); ctx2.moveTo(0,0); ctx2.lineTo(x1,y1); ctx2.stroke();
+    }
+    ctx2.restore(); ctx2.globalAlpha=1;
+  }
+  function drawSprites(ctx2){
+    const g=parseFloat(gain.value), eL=bandEnergy('low'), eM=bandEnergy('mid'), eH=bandEnergy('high');
+    const jit=parseFloat(jitSprites.value);
+    for (let p of parts){
+      p.life++; if (p.life>p.max){ Object.assign(p, newParticle()); continue; }
+      p.z -= (0.001 + eL*0.01); if (p.z<0.05){ p.z = 1.0; p.x=Math.random()*W; p.y=Math.random()*H; }
+      p.vx += (Math.random()-0.5)*(0.06+eH*0.14); p.vy += (Math.random()-0.5)*(0.06+eH*0.14);
+      p.vy -= 0.0008 + eM*0.005; p.x += p.vx*(0.6+eH*0.9); p.y += p.vy*(0.6+eH*0.9);
+      if (p.x<-10) p.x=W+10; if (p.x>W+10) p.x=-10; if (p.y<-10) p.y=H+10; if (p.y>H+10) p.y=-10;
+      const t=((p.hue + eL*0.5 + eH*0.5) % 1);
+      const scJit = 1 + (Math.random()-0.5)*jit;
+      const sz = (p.size*(1+eL*2.5+eH*1.5)*g*0.6) * (1.5/(p.z+0.5)) * scJit * driftScale();
+      ctx2.fillStyle=colorFor('sprites', t);
+      ctx2.globalAlpha = clampf(1.2 - p.z, 0.1, 1);
+      ctx2.beginPath(); ctx2.arc(p.x, p.y, sz, 0, Math.PI*2); ctx2.fill();
+      ctx2.globalAlpha = 1;
+    }
+  }
+  const sparks=[];
+  function drawDistinctBands(ctx2){
+    const eL=bandEnergy('low'), eM=bandEnergy('mid'), eH=bandEnergy('high');
+    const bassCount = 3;
+    for (let i=0;i<bassCount;i++){
+      const angle = (i/bassCount)*Math.PI*2 + performance.now()*0.0003;
+      const r = Math.min(W,H)*0.18*(1+eL*1.2)*driftScale();
+      const cx = W/2 + Math.cos(angle)*Math.min(W,H)*0.12;
+      const cy = H*0.6 + Math.sin(angle*1.2)*Math.min(W,H)*0.08;
+      const g = ctx2.createRadialGradient(cx,cy, r*0.1, cx,cy, r);
+      g.addColorStop(0, colorFor('rays', 0.1 + i*0.15));
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx2.fillStyle=g;
+      ctx2.beginPath(); ctx2.arc(cx,cy,r*1.1,0,Math.PI*2); ctx2.fill();
+    }
+    const sides = 5 + Math.floor(eM*6);
+    const baseR = Math.min(W,H)*0.28*(1+eM*0.2)*driftScale();
+    ctx2.save(); ctx2.translate(W/2, H/2); ctx2.rotate(performance.now()*0.0004*(1+eM*2));
+    ctx2.strokeStyle=colorFor('rays', 0.55); ctx2.lineWidth=2+eM*6; ctx2.globalAlpha=0.8;
+    ctx2.beginPath();
+    for (let i=0;i<sides;i++){
+      const a=(i/sides)*Math.PI*2; const x=Math.cos(a)*baseR, y=Math.sin(a)*baseR;
+      if(i===0) ctx2.moveTo(x,y); else ctx2.lineTo(x,y);
+    }
+    ctx2.closePath(); ctx2.stroke(); ctx2.restore(); ctx2.globalAlpha=1;
+
+    const target = Math.floor(20 + eH*140);
+    while (sparks.length<target) sparks.push({ x:Math.random()*W, y:Math.random()*H, vx:(Math.random()-0.5)*3, vy:(Math.random()-0.5)*3, life:0, max: 20+Math.random()*60, hue:Math.random() });
+    for (let s of sparks){
+      s.life++; s.x+=s.vx*(1+eH*2); s.y+=s.vy*(1+eH*2);
+      if (s.life>s.max){ const idx=sparks.indexOf(s); if(idx>=0) sparks.splice(idx,1); continue; }
+      const t=(s.hue + eH*0.5) % 1; ctx2.strokeStyle=colorFor('rays', t); ctx2.lineWidth=1;
+      ctx2.beginPath(); ctx2.moveTo(s.x, s.y); ctx2.lineTo(s.x-s.vx*3, s.y-s.vy*3); ctx2.stroke();
+    }
+  }
+  function drawFlecks(ctx2){
+    const eH=bandEnergy('high'), eM=bandEnergy('mid');
+    const jit=parseFloat(jitFlecks.value);
+    for (let f of flecks){
+      f.life++; if (f.life>f.max) Object.assign(f, newFleck());
+      f.vx += (Math.random()-0.5)*0.02 + eH*0.02;
+      f.vy += (Math.random()-0.5)*0.02 - eM*0.01;
+      f.x += f.vx; f.y += f.vy; f.rot += f.vr*(1+eH*1.5);
+      f.z -= (0.001 + eM*0.01); if (f.z<0.05){ f.z=1.0; f.x=Math.random()*W; f.y=Math.random()*H; }
+      ctx2.save(); ctx2.translate(f.x,f.y); ctx2.rotate(f.rot);
+      const t=(f.hue + eH*0.3) % 1; ctx2.fillStyle=colorFor('flecks', t);
+      const scale = (1.3/(f.z+0.3)) * (1 + (Math.random()-0.5)*jit) * driftScale();
+      ctx2.scale(scale, scale);
+      ctx2.beginPath();
+      for (let i=0;i<f.pts.length;i++){ const p=f.pts[i]; if (i===0) ctx2.moveTo(p.x, p.y); else ctx2.lineTo(p.x,p.y); }
+      ctx2.closePath(); ctx2.globalAlpha = 0.5 + eH*0.4; ctx2.fill(); ctx2.restore(); ctx2.globalAlpha=1;
+    }
+  }
+
+  // Shapes
+  function drawShape(ctx2, s){
+    ctx2.save(); ctx2.translate(s.x,s.y); ctx2.rotate(s.rot);
+    const t=(s.hue + s.life/s.max)%1;
+    ctx2.strokeStyle = colorFor('shapes', t); ctx2.fillStyle = colorFor('shapes', (t+0.2)%1);
+    ctx2.lineWidth = 2;
+    const sc = s.scale * (1.8/(s.z+0.6)) * (1 + (Math.random()-0.5)*parseFloat(jitShapes.value)) * driftScale();
+    ctx2.scale(sc, sc);
+    if (s.type==='star'){
+      const spikes = 7, outer = 24, inner = 12;
+      ctx2.beginPath();
+      for (let i=0;i<spikes*2;i++){
+        const r = (i%2===0)?outer:inner;
+        const a = (i/(spikes*2))*Math.PI*2;
+        const x=Math.cos(a)*r, y=Math.sin(a)*r;
+        if (i===0) ctx2.moveTo(x,y); else ctx2.lineTo(x,y);
+      }
+      ctx2.closePath(); ctx2.globalAlpha=0.9; ctx2.stroke(); ctx2.globalAlpha=0.25; ctx2.fill();
+    } else if (s.type==='heart'){
+      ctx2.beginPath();
+      for (let a=0; a<=Math.PI*2; a+=0.05){
+        const x = 16*Math.pow(Math.sin(a),3);
+        const y = -(13*Math.cos(a) - 5*Math.cos(2*a) - 2*Math.cos(3*a) - Math.cos(4*a));
+        if (a===0) ctx2.moveTo(x,y); else ctx2.lineTo(x,y);
+      }
+      ctx2.closePath(); ctx2.globalAlpha=0.85; ctx2.stroke(); ctx2.globalAlpha=0.22; ctx2.fill();
+    } else if (s.type==='halo'){
+      ctx2.globalAlpha=0.5; ctx2.beginPath(); ctx2.arc(0,0,24,0,Math.PI*2); ctx2.stroke();
+      ctx2.globalAlpha=0.2; ctx2.beginPath(); ctx2.arc(0,0,36,0,Math.PI*2); ctx2.stroke();
+    } else if (s.type==='splat'){
+      const n=8, r0=10, r1=26;
+      ctx2.beginPath();
+      for (let i=0;i<n;i++){
+        const a = (i/n)*Math.PI*2;
+        const r = lerp(r0,r1, Math.random());
+        const x = Math.cos(a)*r, y=Math.sin(a)*r;
+        if (i===0) ctx2.moveTo(x,y); else ctx2.lineTo(x,y);
+      }
+      ctx2.closePath(); ctx2.globalAlpha=0.2; ctx2.fill(); ctx2.globalAlpha=0.6; ctx2.stroke();
+    }
+    ctx2.restore(); ctx2.globalAlpha=1;
+  }
+  function updateShapes(){
+    const rate = parseFloat(shapesRate.value) * (parseInt(budget.value,10)/100);
+    const eM = bandEnergy('mid'), eH=bandEnergy('high');
+    const kickNow = detectBeat('low');
+    const snareNow = detectBeat('mid');
+    if (kickNow){ for (let i=0;i<Math.ceil(rate*0.8); i++) spawnShape('star'); }
+    if (snareNow){ for (let i=0;i<Math.ceil(rate*0.8); i++) spawnShape('splat'); }
+    const base = rate * (0.02 + eM*0.06 + eH*0.04);
+    for (let i=0;i<base; i++) spawnShape(Math.random()<0.5?'halo':'heart');
+    for (let s of shapes){ s.life++; s.x += s.vx; s.y += s.vy; s.rot += s.vr; s.z -= 0.006; if (s.z<0.05){ s.z=1.0; } }
+    for (let i=shapes.length-1;i>=0;i--) if (shapes[i].life>shapes[i].max) shapes.splice(i,1);
+  }
+  function drawShapes(ctx2){ for (let s of shapes) drawShape(ctx2, s); }
+
+  // Beat detection
+  let env = { low:0, mid:0, high:0 }, lastBeat={ low:0, mid:0, high:0 };
+  function detectBeat(band){
+    const e = bandEnergy(band);
+    const atk=0.5, dec=0.02;
+    env[band] = Math.max(e*atk + env[band]*(1-atk), env[band] - dec);
+    const th = 0.18, cooldown = 120;
+    const now = performance.now();
+    if (e - env[band] > th && now - lastBeat[band] > cooldown){ lastBeat[band] = now; return true; }
+    return false;
+  }
+
+  // Kaleido composite
+  function kaleidoComposite(){
+    const src = document.createElement('canvas'); src.width=W; src.height=H;
+    const srx = src.getContext('2d'); srx.drawImage(scene,0,0);
+    sctx.clearRect(0,0,W,H);
+    const seg = parseInt(segments.value,10), amt = parseFloat(kAmt.value), rot = parseFloat(kRot.value), warp = parseFloat(kWarp.value);
+    if (amt < 1.0){ sctx.globalAlpha = Math.max(0, 1.0-amt*0.9); sctx.drawImage(src,0,0); sctx.globalAlpha = 1; }
+    const cx=W/2, cy=H/2, theta = (Math.PI*2)/seg, radius = Math.hypot(W,H);
+    if (!kaleidoComposite._phase) kaleidoComposite._phase=0;
+    kaleidoComposite._phase += rot*0.01 + bandEnergy('low')*0.02;
+    const phase = kaleidoComposite._phase;
+    for (let i=0;i<seg;i++){
+      sctx.save(); sctx.translate(cx,cy); sctx.rotate(phase + i*theta);
+      sctx.beginPath(); sctx.moveTo(0,0); sctx.arc(0,0, radius, -theta/2, theta/2); sctx.closePath(); sctx.clip();
+      if (i%2===1) sctx.scale(-1,1);
+      const scale = 1 + bandEnergy('mid')*warp*0.6 + bandEnergy('high')*warp*0.4;
+      sctx.scale(scale, scale);
+      sctx.drawImage(src, -cx, -cy, W, H);
+      sctx.restore();
+    }
+  }
+
+  // Glow
+  function applyGlow2D(){
+    const blur=parseFloat(glow.value); if (blur<=0.1) return;
+    const tmp=document.createElement('canvas'); tmp.width=W; tmp.height=H;
+    const tctx=tmp.getContext('2d'); tctx.drawImage(scene,0,0,W,H);
+    sctx.filter=`blur(${blur}px)`; sctx.globalCompositeOperation='screen';
+    sctx.drawImage(tmp,0,0,W,H);
+    sctx.filter='none'; sctx.globalCompositeOperation='source-over';
+  }
+
+  // RNG auto-cycle
+  let lastPresetChange=performance.now();
+  const cycleList=['kaleido','bands','sprites','sunburst','osc','bars','flecks','shapes','mix'];
+  function randomizePalette(){
+    const choices=['neon','fire','ocean','pastel','glacier','random','custom'];
+    const pick = choices[Math.floor(Math.random()*choices.length)];
+    if (pick==='custom'){
+      function rnd(){ return '#'+Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6,'0'); }
+      c1.value=rnd(); c2.value=rnd(); c3.value=rnd();
+    }
+    paletteSel.value = pick; globalPal = makePalette(paletteSel.value);
+  }
+
+  // Frame
+  function frame(t){
+    requestAnimationFrame(frame);
+    if (!playing || !anA){ gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); return; }
+    anA.getByteFrequencyData(freqA);
+    anB.getByteFrequencyData(freqB);
+    anC.getByteFrequencyData(freqC);
+
+    if (auto.value==='on'){
+      const now=performance.now();
+      const per = parseFloat(period.value) * 1000;
+      if (now-lastPresetChange>per){
+        lastPresetChange=now;
+        const idx = cycleList.indexOf(preset.value);
+        preset.value = cycleList[(idx+1) % cycleList.length];
+        randomizePalette();
+      }
+    }
+
+    drawBG(sctx);
+    if (layers.sprites) drawSprites(sctx);
+    if (layers.halo)    drawHalo(sctx);
+    if (layers.osc)     drawOsc(sctx);
+    if (layers.bars)    drawBars(sctx);
+    if (layers.sun)     drawSunburst(sctx);
+    if (layers.bands)   drawDistinctBands(sctx);
+    if (layers.flecks)  drawFlecks(sctx);
+    if (layers.shapes){ updateShapes(); drawShapes(sctx); }
+    if (layers.kaleido) kaleidoComposite();
+    applyGlow2D();
+
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
+    gl.uniform1i(u_tex, 0);
+    gl.uniform1f(u_time, t*0.001);
+    gl.uniform1f(u_lens, parseFloat(lensAmt.value));
+    gl.uniform1f(u_ripple, parseFloat(rippleAmt.value));
+    gl.uniform1f(u_liquid, parseFloat(liquidAmt.value));
+    gl.uniform1f(u_safe, parseFloat(safeMargin.value));
+    gl.uniform1f(u_low, bandEnergy('low'));
+    gl.uniform1f(u_mid, bandEnergy('mid'));
+    gl.uniform1f(u_high, bandEnergy('high'));
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  // UI
+  window.addEventListener('keydown', e=>{ if (e.key.toLowerCase()==='h') toggleUI(); });
+  toggle.addEventListener('click', toggleUI);
+  function toggleUI(){ if (ui.style.display!=='none'){ ui.style.display='none'; hidden.style.display='block'; } else { ui.style.display='block'; hidden.style.display='none'; } }
+  smooth.addEventListener('input', ()=>{
+    const s=parseFloat(smooth.value);
+    anA.smoothingTimeConstant = s;
+    anB.smoothingTimeConstant = Math.min(0.95, s*0.5+0.15);
+    anC.smoothingTimeConstant = Math.min(0.98, Math.max(0.8, s+0.2));
+  });
+  fftSel.addEventListener('change', ()=> setupAnalysers(parseInt(fftSel.value,10)) );
+
+  function init(){
+    doResize();
+    setStatus('Pick a source: Mic/Loopback, Tab Capture, or File.');
+    window.addEventListener('click', ensureAudio, { once:true });
+    requestAnimationFrame(frame);
+  }
+  init();
+})();
+</script>
+</body>
+</html>
