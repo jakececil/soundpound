@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AetherViz — NOVA</title>
+<title>AetherViz — NOVA r2</title>
 <style>
   :root { --bg:#000; --fg:#eaeaea; --accent:#8ef; }
   html, body { margin:0; padding:0; height:100%; background:#000; color:var(--fg);
     font-family:system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; overflow:hidden; }
   #webgl { position:fixed; inset:0; width:100vw; height:100vh; display:block; background:#000; }
   #ui {
-    position: fixed; top: 12px; left: 12px; width: min(640px, 92vw);
+    position: fixed; top: 12px; left: 12px; width: min(660px, 92vw);
     max-height: calc(100vh - 24px); overflow: auto;
     background: rgba(18,18,18,0.92); border:1px solid #222; border-radius:12px;
     padding:12px; backdrop-filter: blur(8px); box-shadow: 0 10px 24px rgba(0,0,0,0.45);
   }
-  #ui h1 { margin:0 0 10px 0; font-size:16px; letter-spacing:0.4px; font-weight:600; }
+  #ui h1 { margin:0 0 10px 0; font-size:16px; letter-spacing:0.4px; font-weight:600; display:flex; gap:8px; align-items:center; justify-content:space-between;}
   .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
   .row { display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; margin:6px 0; }
   .row > *:last-child { width: 230px; }
@@ -40,20 +40,27 @@
   #hidden { position:fixed; bottom:12px; left:12px; font-size:12px; color:#777; background:rgba(18,18,18,0.62); padding:6px 8px; border-radius:8px; border:1px solid #222; display:none; }
   .caps { text-transform: uppercase; font-size:11px; color:#aaa; letter-spacing:0.08em; }
 
-  /* Layer toggle buttons */
-  .tbar { display:flex; flex-wrap:wrap; gap:6px; }
+  /* Two-column layer button grid */
+  .tbar { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:6px; }
   .tbtn {
-    padding:6px 10px; border-radius:8px; border:1px solid #2a2a2a; background:#131313; color:#bbb;
-    font-size:12px; cursor:pointer; user-select:none; outline:none;
+    padding:8px 10px; border-radius:8px; border:1px solid #2a2a2a; background:#131313; color:#bbb;
+    font-size:12px; cursor:pointer; user-select:none; outline:none; width:100%;
   }
   .tbtn.active { background:#1d2630; color:#eaf6ff; border-color:#2b3b4d; box-shadow: inset 0 0 0 1px #2b3b4d; }
+  .inline { display:flex; gap:8px; }
 </style>
 </head>
 <body>
 <canvas id="webgl"></canvas>
 
 <div id="ui">
-  <h1>🎧 AetherViz — NOVA</h1>
+  <h1>
+    <span>🎧 AetherViz — NOVA r2</span>
+    <span class="inline">
+      <button id="btnRandom">🎲 Randomize Now</button>
+      <button id="toggle">▣ Hide</button>
+    </span>
+  </h1>
 
   <div class="grid">
     <button id="btnMic">🎙️ Mic / Loopback</button>
@@ -98,7 +105,7 @@
   <div class="sep"></div>
   <div class="grid full">
     <div class="row"><span>Auto Cycle</span><select id="auto"><option value="on" selected>On</option><option value="off">Off</option></select></div>
-    <div class="row"><span>Period (sec)</span><input id="period" type="range" min="0.25" max="120" step="0.05" value="28" /></div>
+    <div class="row"><span>Period (sec)</span><input id="period" type="range" min="0.25" max="120" step="0.05" value="12" /></div>
     <div class="row"><span>Palette (Global)</span>
       <select id="palette">
         <option value="neon">Neon</option><option value="fire">Fire</option><option value="ocean">Ocean</option>
@@ -160,15 +167,13 @@
   </div>
 
   <div class="sep"></div>
-  <div class="tiny">Press <b>H</b> to hide UI. Auto-cycle randomizes palette each period (0.25s–120s). Beats: kicks ⭐, snares splats. If tab capture fails, make sure “Share this tab’s audio” is enabled after picking the tab.</div>
+  <div class="tiny">H = hide UI. Auto-cycle randomizes **everything** (0.25s–120s). Beats: kicks ⭐, snares splats.</div>
   <div id="footer">
-    <button id="toggle">▣ Hide</button>
     <div id="status">Idle</div>
   </div>
 </div>
 <div id="hidden">Controls hidden — press H to toggle.</div>
 
-<!-- hidden video sink for displayMedia -->
 <video id="sink" autoplay muted playsinline style="display:none"></video>
 
 <script>
@@ -178,20 +183,19 @@
   let W=0,H=0,DPR=Math.max(1, Math.min(window.devicePixelRatio||1, 2));
   const scene = document.createElement('canvas');
   const sctx  = scene.getContext('2d');
-
   let audio=null, master=null, srcNode=null, currentStream=null, anA=null, anB=null, anC=null, freqA, freqB, freqC, timeData;
   let playing=false;
 
-  // UI refs
   const preset=$('preset'), gain=$('gain'), smooth=$('smoothing'), fftSel=$('fft'), glow=$('glow'), barsSlide=$('bars');
   const bgmode=$('bgmode');
   const segments=$('segments'), kAmt=$('kAmt'), kRot=$('kRot'), kWarp=$('kWarp');
-  const auto=$('auto'), period=$('period'), status=$('status'), ui=$('ui'), toggle=$('toggle'), hidden=$('hidden');
+  const auto=$('auto'), period=$('period'), status=$('status');
   const paletteSel=$('palette'), c1=$('c1'), c2=$('c2'), c3=$('c3');
   const palSprites=$('palSprites'), palFlecks=$('palFlecks'), palShapes=$('palShapes'), palBars=$('palBars'), palRays=$('palRays');
   const particlesCount=$('particlesCount'), flecksCount=$('flecksCount'), shapesRate=$('shapesRate'), budget=$('budget');
   const jitSprites=$('jitSprites'), jitFlecks=$('jitFlecks'), jitShapes=$('jitShapes'), drift=$('drift');
   const lensAmt=$('lensAmt'), rippleAmt=$('rippleAmt'), liquidAmt=$('liquidAmt'), safeMargin=$('safeMargin');
+  const btnRandom = $('btnRandom');
 
   // Layer toggles
   const layers = { sprites:true, halo:true, osc:true, bars:false, sun:false, bands:true, flecks:true, shapes:true, kaleido:true };
@@ -286,7 +290,7 @@
   }
   function setStatus(t){ status.textContent=t; }
 
-  // Buttons
+  // Buttons for sources
   $('btnMic').addEventListener('click', async()=>{
     try{
       ensureAudio();
@@ -310,10 +314,8 @@
     let stream=null;
     for (const c of attempts){ stream = await tryGet(c); if (stream) break; }
     if (!stream){ setStatus('Tab capture failed: permission denied or no audio track.'); return; }
-    sink.srcObject = stream; // keep alive
-    try{ await sink.play(); }catch{}
-    const hasAudio = stream.getAudioTracks().length>0;
-    if (!hasAudio){ setStatus('Captured display but no audio. Enable "Share this tab\'s audio".'); }
+    sink.srcObject = stream; try{ await sink.play(); }catch{}
+    if (!stream.getAudioTracks().length){ setStatus('Captured display but no audio. Enable "Share this tab\'s audio".'); }
     const node = audio.createMediaStreamSource(stream);
     setSourceNode(node, stream);
     playing=true; setStatus('Tab audio capturing…');
@@ -338,12 +340,8 @@
     playing=true; setStatus('Playing: '+(f.name||'file'));
   });
 
-  // WebGL post shader (safe margin + distortions)
-  const vs = `
-    attribute vec2 a_pos;
-    varying vec2 v_uv;
-    void main(){ v_uv = (a_pos+1.0)*0.5; gl_Position = vec4(a_pos,0.,1.); }
-  `;
+  // WebGL post shader
+  const vs = `attribute vec2 a_pos; varying vec2 v_uv; void main(){ v_uv=(a_pos+1.0)*0.5; gl_Position=vec4(a_pos,0.,1.); }`;
   const fs = `
     precision mediump float;
     varying vec2 v_uv;
@@ -351,42 +349,30 @@
     uniform float u_time;
     uniform float u_lens, u_ripple, u_liquid, u_safe;
     uniform float u_low, u_mid, u_high;
-
     float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
-    float noise(vec2 p){
-      vec2 i = floor(p), f = fract(p);
-      float a = hash(i), b = hash(i+vec2(1.0,0.0)), c = hash(i+vec2(0.0,1.0)), d = hash(i+vec2(1.0,1.0));
-      vec2 u = f*f*(3.0-2.0*f);
+    float noise(vec2 p){ vec2 i=floor(p), f=fract(p);
+      float a=hash(i), b=hash(i+vec2(1,0)), c=hash(i+vec2(0,1)), d=hash(i+vec2(1,1));
+      vec2 u=f*f*(3.0-2.0*f);
       return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
     }
-
     void main(){
-      vec2 center = vec2(0.5);
-      vec2 uv = v_uv;
-
-      float zoom = 1.0 + u_lens * 0.25 + u_safe;
-      uv = center + (uv - center) / zoom;
-
-      vec2 d = uv - center;
-      float r = length(d);
-
-      float lensAmt = u_lens * (0.6 + 0.4*u_low);
-      float lens = r * (1.0 + lensAmt * (r*r));
+      vec2 center=vec2(0.5), uv=v_uv;
+      float zoom = 1.0 + u_lens*0.25 + u_safe;
+      uv = center + (uv-center)/zoom;
+      vec2 d=uv-center; float r=length(d);
+      float lensAmt=u_lens*(0.6+0.4*u_low);
+      float lens=r*(1.0 + lensAmt*(r*r));
       vec2 uv1 = center + normalize(d) * lens;
-
-      float rip = sin( (r*20.0 - u_time*2.0) ) * 0.002 * u_ripple * (0.6+u_mid);
-      uv1 += normalize(d) * rip;
-
-      float n = noise(uv*vec2(6.0) + u_time*0.5);
-      float n2= noise(uv*vec2(10.0) - u_time*0.8);
-      vec2 disp = (vec2(n-0.5, n2-0.5)) * 0.02 * u_liquid * (0.7+u_high);
+      float rip = sin((r*20.0 - u_time*2.0)) * 0.002 * u_ripple * (0.6+u_mid);
+      uv1 += normalize(d)*rip;
+      float n=noise(uv*vec2(6.0)+u_time*0.5), n2=noise(uv*vec2(10.0)-u_time*0.8);
+      vec2 disp=(vec2(n-0.5,n2-0.5))*0.02*u_liquid*(0.7+u_high);
       uv1 += disp;
-
       uv1 = clamp(uv1, vec2(0.001), vec2(0.999));
       gl_FragColor = texture2D(u_tex, uv1);
     }
   `;
-  function compileShader(type, src){ const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); } return s; }
+  function compileShader(type, src){ const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s)); return s; }
   const prog = gl.createProgram();
   gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, vs));
   gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, fs));
@@ -406,7 +392,6 @@
   const u_low = gl.getUniformLocation(prog, "u_low");
   const u_mid = gl.getUniformLocation(prog, "u_mid");
   const u_high= gl.getUniformLocation(prog, "u_high");
-
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -414,8 +399,17 @@
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-  // Visual state
+  // Visual state & helpers (unchanged from NOVA except where noted)
   let parts=[], flecks=[], shapes=[];
+  function clampf(v,a,b){ return Math.max(a, Math.min(b,v)); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+  function mapLogIndex(i, n, minHz=20, maxHz=20000, sampleRate=44100){
+    const minLog=Math.log10(minHz), maxLog=Math.log10(maxHz), frac=i/(n-1);
+    const hz=Math.pow(10, lerp(minLog, maxLog, frac));
+    const bin = Math.round(hz / (sampleRate/2) * (anB.frequencyBinCount-1));
+    return clampf(bin, 0, anB.frequencyBinCount-1);
+  }
+
   function newParticle(){ return { x:Math.random()*W, y:Math.random()*H, z:Math.random()*1.0, vx:(Math.random()-0.5)*0.6, vy:(Math.random()-0.5)*0.6, life:0, max:240+Math.random()*360, size:1+Math.random()*2, hue:Math.random() }; }
   function newFleck(){
     const sides = 3 + Math.floor(Math.random()*5), pts=[], baseR = 1 + Math.random()*3;
@@ -438,15 +432,6 @@
   initCounts();
   [particlesCount,flecksCount,budget].forEach(inp=> inp.addEventListener('input', initCounts));
 
-  // Helpers
-  function clampf(v,a,b){ return Math.max(a, Math.min(b,v)); }
-  function lerp(a,b,t){ return a + (b-a)*t; }
-  function mapLogIndex(i, n, minHz=20, maxHz=20000, sampleRate=44100){
-    const minLog=Math.log10(minHz), maxLog=Math.log10(maxHz), frac=i/(n-1);
-    const hz=Math.pow(10, lerp(minLog, maxLog, frac));
-    const bin = Math.round(hz / (sampleRate/2) * (anB.frequencyBinCount-1));
-    return clampf(bin, 0, anB.frequencyBinCount-1);
-  }
   function bandEnergy(band){
     const arr = band==='high'?freqB:(band==='low'?freqC:freqA);
     const len=arr.length; let s=0,n=0;
@@ -483,7 +468,7 @@
   let driftPhase=0;
   function driftScale(){ driftPhase += 0.002; return 1.0 + Math.sin(driftPhase)*parseFloat(drift.value)*0.2; }
 
-  // Layers
+  // Draw layers
   function drawBars(ctx2){
     const bars=parseInt(barsSlide.value,10), g=parseFloat(gain.value), midY=H/2;
     ctx2.save(); ctx2.translate(0,midY);
@@ -602,8 +587,8 @@
       ctx2.closePath(); ctx2.globalAlpha = 0.5 + eH*0.4; ctx2.fill(); ctx2.restore(); ctx2.globalAlpha=1;
     }
   }
-
   // Shapes
+  const jitShapes=$('jitShapes');
   function drawShape(ctx2, s){
     ctx2.save(); ctx2.translate(s.x,s.y); ctx2.rotate(s.rot);
     const t=(s.hue + s.life/s.max)%1;
@@ -657,9 +642,6 @@
     for (let s of shapes){ s.life++; s.x += s.vx; s.y += s.vy; s.rot += s.vr; s.z -= 0.006; if (s.z<0.05){ s.z=1.0; } }
     for (let i=shapes.length-1;i>=0;i--) if (shapes[i].life>shapes[i].max) shapes.splice(i,1);
   }
-  function drawShapes(ctx2){ for (let s of shapes) drawShape(ctx2, s); }
-
-  // Beat detection
   let env = { low:0, mid:0, high:0 }, lastBeat={ low:0, mid:0, high:0 };
   function detectBeat(band){
     const e = bandEnergy(band);
@@ -671,7 +653,7 @@
     return false;
   }
 
-  // Kaleido composite
+  // Kaleido
   function kaleidoComposite(){
     const src = document.createElement('canvas'); src.width=W; src.height=H;
     const srx = src.getContext('2d'); srx.drawImage(scene,0,0);
@@ -703,18 +685,109 @@
     sctx.filter='none'; sctx.globalCompositeOperation='source-over';
   }
 
-  // RNG auto-cycle
-  let lastPresetChange=performance.now();
-  const cycleList=['kaleido','bands','sprites','sunburst','osc','bars','flecks','shapes','mix'];
-  function randomizePalette(){
-    const choices=['neon','fire','ocean','pastel','glacier','random','custom'];
-    const pick = choices[Math.floor(Math.random()*choices.length)];
-    if (pick==='custom'){
-      function rnd(){ return '#'+Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6,'0'); }
-      c1.value=rnd(); c2.value=rnd(); c3.value=rnd();
-    }
-    paletteSel.value = pick; globalPal = makePalette(paletteSel.value);
+  // ---------- RADICAL RANDOMIZER ----------
+  const layerKeys = ["sprites","halo","osc","bars","sun","bands","flecks","shapes","kaleido"];
+  const rng = (a,b)=> a + Math.random()*(b-a);
+  const rint = (a,b)=> Math.floor(rng(a,b+1));
+  const rpick = arr => arr[Math.floor(Math.random()*arr.length)];
+  function rndColor(){ return '#'+Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6,'0'); }
+  function setVal(el, v){ if (!el) return; el.value = String(v); el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change')); }
+  function randomizePalettes(){
+    const choices=['inherit','neon','fire','ocean','pastel','glacier','random','custom'];
+    [palSprites,palFlecks,palShapes,palBars,palRays].forEach(sel=>{
+      const pick=rpick(choices); sel.value=pick;
+      if (pick==='custom'){ c1.value=rndColor(); c2.value=rndColor(); c3.value=rndColor(); }
+    });
+    const gpick=rpick(['neon','fire','ocean','pastel','glacier','random','custom']); paletteSel.value=gpick;
+    if (gpick==='custom'){ c1.value=rndColor(); c2.value=rndColor(); c3.value=rndColor(); }
+    globalPal = makePalette(paletteSel.value);
   }
+  let lastSig = "";
+  function signature(){
+    // quick hash signature to bias away from near-duplicates
+    const fields = [
+      gain.value, smoothing.value, fftSel.value, glow.value, barsSlide.value,
+      segments.value, kAmt.value, kRot.value, kWarp.value,
+      lensAmt.value, rippleAmt.value, liquidAmt.value, safeMargin.value,
+      particlesCount.value, flecksCount.value, shapesRate.value, budget.value,
+      jitSprites.value, jitFlecks.value, jitShapes.value, drift.value,
+      paletteSel.value, palSprites.value, palFlecks.value, palShapes.value, palBars.value, palRays.value,
+      bgmode.value, Object.values(layers).map(v=>v?1:0).join('')
+    ].join('|');
+    let h=0; for (let i=0;i<fields.length;i++){ h=(h*131 + fields.charCodeAt(i))>>>0; }
+    return h.toString(16);
+  }
+  function randomizeEverything(radical=true){
+    // Layers: at least 4 on, vary set
+    layerKeys.forEach(k=> layers[k] = Math.random()<0.6);
+    // ensure minimum on
+    if (Object.values(layers).filter(Boolean).length<4){
+      rpick(layerKeys.slice(0,5).concat(['kaleido'])).split?.(); // noop just to keep flow
+      while(Object.values(layers).filter(Boolean).length<4){
+        layers[rpick(layerKeys)] = true;
+      }
+    }
+    // UI reflect
+    syncButtons();
+
+    // Core sliders & switches (wide ranges)
+    setVal(gain, rng(0.6, 3.5));
+    setVal(smooth, rng(0.0, 0.9));
+    const fftOpts=['512','1024','2048','4096','8192']; fftSel.value=rpick(fftOpts); fftSel.dispatchEvent(new Event('change'));
+    setVal(glow, rint(0, 10));
+    setVal(barsSlide, rint(12, 220));
+    bgmode.value = rpick(['black','gradient','plasma']);
+
+    setVal(segments, rint(4, 24));
+    setVal(kAmt, rng(0,1));
+    setVal(kRot, rng(-1.8, 1.8));
+    setVal(kWarp, rng(0,1.2));
+
+    setVal(lensAmt, rng(0, 1.5));
+    setVal(rippleAmt, rng(0, 2));
+    setVal(liquidAmt, rng(0, 2));
+    setVal(safeMargin, rng(0.02, 0.22));
+
+    setVal(particlesCount, rint(100, 2400));
+    setVal(flecksCount, rint(50, 1300));
+    setVal(shapesRate, rng(0.2, 12.0));
+    setVal(budget, rint(40, 160));
+
+    setVal(jitSprites, rng(0, 1.6));
+    setVal(jitFlecks, rng(0, 1.6));
+    setVal(jitShapes, rng(0, 1.6));
+    setVal(drift, rng(0.0, 1.4));
+
+    randomizePalettes();
+    // also jump Preset to bias different compositions
+    preset.value = rpick(['kaleido','bands','sprites','sunburst','osc','bars','flecks','shapes','mix']);
+
+    // try to avoid repeating near-identical state
+    const sig = signature();
+    if (sig===lastSig){ // nudge a few params
+      setVal(kRot, rng(-2,2));
+      setVal(lensAmt, rng(0,1.5));
+      setVal(glow, rint(0,12));
+    }
+    lastSig = signature();
+    status.textContent = '🎲 randomized';
+  }
+  btnRandom.addEventListener('click', ()=> randomizeEverything(true) );
+
+  // Auto-cycle
+  let lastPresetChange=performance.now();
+  function autoCycleTick(){
+    if (auto.value!=='on') return;
+    const now=performance.now();
+    const per = parseFloat(period.value) * 1000;
+    if (now-lastPresetChange>per){
+      lastPresetChange=now;
+      randomizeEverything(true);
+    }
+  }
+
+  // Analyser helpers
+  function setupAnalysersPublic(){ setupAnalysers(parseInt(fftSel.value,10)); }
 
   // Frame
   function frame(t){
@@ -724,16 +797,7 @@
     anB.getByteFrequencyData(freqB);
     anC.getByteFrequencyData(freqC);
 
-    if (auto.value==='on'){
-      const now=performance.now();
-      const per = parseFloat(period.value) * 1000;
-      if (now-lastPresetChange>per){
-        lastPresetChange=now;
-        const idx = cycleList.indexOf(preset.value);
-        preset.value = cycleList[(idx+1) % cycleList.length];
-        randomizePalette();
-      }
-    }
+    autoCycleTick();
 
     drawBG(sctx);
     if (layers.sprites) drawSprites(sctx);
@@ -745,6 +809,7 @@
     if (layers.flecks)  drawFlecks(sctx);
     if (layers.shapes){ updateShapes(); drawShapes(sctx); }
     if (layers.kaleido) kaleidoComposite();
+
     applyGlow2D();
 
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -761,10 +826,10 @@
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
-  // UI
+  // UI misc
+  function toggleUI(){ const ui=$('ui'), hidden=$('hidden'); if (ui.style.display!=='none'){ ui.style.display='none'; hidden.style.display='block'; } else { ui.style.display='block'; hidden.style.display='none'; } }
   window.addEventListener('keydown', e=>{ if (e.key.toLowerCase()==='h') toggleUI(); });
-  toggle.addEventListener('click', toggleUI);
-  function toggleUI(){ if (ui.style.display!=='none'){ ui.style.display='none'; hidden.style.display='block'; } else { ui.style.display='block'; hidden.style.display='none'; } }
+  $('toggle').addEventListener('click', toggleUI);
   smooth.addEventListener('input', ()=>{
     const s=parseFloat(smooth.value);
     anA.smoothingTimeConstant = s;
@@ -773,12 +838,9 @@
   });
   fftSel.addEventListener('change', ()=> setupAnalysers(parseInt(fftSel.value,10)) );
 
-  function init(){
-    doResize();
-    setStatus('Pick a source: Mic/Loopback, Tab Capture, or File.');
-    window.addEventListener('click', ensureAudio, { once:true });
-    requestAnimationFrame(frame);
-  }
+  // Init
+  function init(){ doResize(); setStatus('Pick a source: Mic/Loopback, Tab Capture, or File.');
+    window.addEventListener('click', ensureAudio, { once:true }); requestAnimationFrame(frame); }
   init();
 })();
 </script>
