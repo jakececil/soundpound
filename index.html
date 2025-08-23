@@ -297,29 +297,40 @@
     }catch(e){ setStatus('Mic/Loopback failed: '+e.message); }
   });
 
+  
   $('btnTab').addEventListener('click', async()=>{
     ensureAudio();
+    try { await audio.resume(); } catch {}
     async function tryGet(constraints){
       try { return await navigator.mediaDevices.getDisplayMedia(constraints); } catch(e){ return null; }
     }
     const attempts = [
-      { video:{ displaySurface:'browser', width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:30}}, audio:true },
-      { video:true, audio:{ selfBrowserSurface:'include', suppressLocalAudioPlayback:false, systemAudio:'include'} },
+      { video:{ displaySurface:'browser', preferCurrentTab:true, frameRate:{ideal:30}}, audio:true },
+      { video:true, audio:{ selfBrowserSurface:'include', systemAudio:'include', suppressLocalAudioPlayback:false } },
       { video:true, audio:true }
     ];
     let stream=null;
     for (const c of attempts){ stream = await tryGet(c); if (stream) break; }
-    if (!stream){ setStatus('Tab capture failed: permission denied or no audio track.'); return; }
-    sink.srcObject = stream; // keep alive
-    try{ await sink.play(); }catch{}
-    const hasAudio = stream.getAudioTracks().length>0;
-    if (!hasAudio){ setStatus('Captured display but no audio. Enable "Share this tab\'s audio".'); }
-    const node = audio.createMediaStreamSource(stream);
-    setSourceNode(node, stream);
-    playing=true; setStatus('Tab audio capturing…');
+    if (!stream){ setStatus('Tab capture failed: permission denied.'); return; }
+    sink.srcObject = stream; sink.muted = true; try{ await sink.play(); }catch{}
+    function attachIfAudio(){
+      const aud = stream.getAudioTracks();
+      if (aud && aud.length){
+        const node = audio.createMediaStreamSource(stream);
+        setSourceNode(node, stream);
+        playing=true; setStatus('Tab audio capturing ✓');
+        aud[0].addEventListener('ended', ()=> setStatus('Tab audio track ended. Re-capture if needed.'));
+        return true;
+      }
+      return false;
+    }
+    if (!attachIfAudio()){
+      setStatus('Captured display but **no audio** yet — pick **Chrome Tab** and tick **Share this tab’s audio**.');
+      stream.addEventListener('addtrack', ev=>{ if (ev.track && ev.track.kind==='audio'){ attachIfAudio(); } });
+      let tries=0; const poll=setInterval(()=>{ tries++; if (attachIfAudio() || tries>60) clearInterval(poll); }, 500);
+    }
   });
-
-  $('btnTone').addEventListener('click', ()=>{
+$('btnTone').addEventListener('click', ()=>{
     ensureAudio();
     const osc = audio.createOscillator(); const g = audio.createGain(); osc.type='sawtooth'; osc.frequency.value=120; g.gain.value=0.2; osc.connect(g).connect(master);
     const tee = audio.createGain(); g.connect(tee); setSourceNode(tee, null);
@@ -725,7 +736,7 @@
   }
 
   function randomizeEverything(){
-    // Toggle layers (keep at least 4 on)
+    // Toggle layers (keep at least 4)
     const keys = Object.keys(layers);
     keys.forEach(k=> layers[k] = Math.random() < 0.6);
     if (Object.values(layers).filter(Boolean).length < 4){
@@ -733,7 +744,7 @@
         layers[rpick(keys)] = true;
       }
     }
-    // UI reflect
+    // reflect buttons
     (function sync(){ [...tbar.querySelectorAll('.tbtn')].forEach(btn=>{
       const k=btn.dataset.layer; const on=!!layers[k];
       btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', on?'true':'false');
@@ -765,7 +776,7 @@
     setVal(flecksCount, rint(50, 1300));
     setVal(shapesRate, rng(0.2, 12.0));
 
-    // Jitter + drift (preserved, randomized)
+    // Jitter + drift (preserved, randomized because NOVA used them)
     setVal(jitSprites, rng(0, 1.6));
     setVal(jitFlecks, rng(0, 1.6));
     setVal(jitShapes, rng(0, 1.6));
