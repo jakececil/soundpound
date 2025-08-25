@@ -41,7 +41,7 @@
   .caps { text-transform: uppercase; font-size:11px; color:#aaa; letter-spacing:0.08em; }
 
   /* Layer toggle buttons */
-  .tbar { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:6px; }
+  .tbar { display:flex; flex-wrap:wrap; gap:6px; }
   .tbtn {
     padding:6px 10px; border-radius:8px; border:1px solid #2a2a2a; background:#131313; color:#bbb;
     font-size:12px; cursor:pointer; user-select:none; outline:none;
@@ -53,7 +53,7 @@
 <canvas id="webgl"></canvas>
 
 <div id="ui">
-  <h1 style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span>🎧 AetherViz — NOVA</span><button id="btnRandom">🎲 Randomize Now</button></h1>
+  <h1>🎧 AetherViz — NOVA</h1>
 
   <div class="grid">
     <button id="btnMic">🎙️ Mic / Loopback</button>
@@ -297,40 +297,29 @@
     }catch(e){ setStatus('Mic/Loopback failed: '+e.message); }
   });
 
-  
   $('btnTab').addEventListener('click', async()=>{
     ensureAudio();
-    try { await audio.resume(); } catch {}
     async function tryGet(constraints){
       try { return await navigator.mediaDevices.getDisplayMedia(constraints); } catch(e){ return null; }
     }
     const attempts = [
-      { video:{ displaySurface:'browser', preferCurrentTab:true, frameRate:{ideal:30}}, audio:true },
-      { video:true, audio:{ selfBrowserSurface:'include', systemAudio:'include', suppressLocalAudioPlayback:false } },
+      { video:{ displaySurface:'browser', width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:30}}, audio:true },
+      { video:true, audio:{ selfBrowserSurface:'include', suppressLocalAudioPlayback:false, systemAudio:'include'} },
       { video:true, audio:true }
     ];
     let stream=null;
     for (const c of attempts){ stream = await tryGet(c); if (stream) break; }
-    if (!stream){ setStatus('Tab capture failed: permission denied.'); return; }
-    sink.srcObject = stream; sink.muted = true; try{ await sink.play(); }catch{}
-    function attachIfAudio(){
-      const aud = stream.getAudioTracks();
-      if (aud && aud.length){
-        const node = audio.createMediaStreamSource(stream);
-        setSourceNode(node, stream);
-        playing=true; setStatus('Tab audio capturing ✓');
-        aud[0].addEventListener('ended', ()=> setStatus('Tab audio track ended. Re-capture if needed.'));
-        return true;
-      }
-      return false;
-    }
-    if (!attachIfAudio()){
-      setStatus('Captured display but **no audio** yet — pick **Chrome Tab** and tick **Share this tab’s audio**.');
-      stream.addEventListener('addtrack', ev=>{ if (ev.track && ev.track.kind==='audio'){ attachIfAudio(); } });
-      let tries=0; const poll=setInterval(()=>{ tries++; if (attachIfAudio() || tries>60) clearInterval(poll); }, 500);
-    }
+    if (!stream){ setStatus('Tab capture failed: permission denied or no audio track.'); return; }
+    sink.srcObject = stream; // keep alive
+    try{ await sink.play(); }catch{}
+    const hasAudio = stream.getAudioTracks().length>0;
+    if (!hasAudio){ setStatus('Captured display but no audio. Enable "Share this tab\'s audio".'); }
+    const node = audio.createMediaStreamSource(stream);
+    setSourceNode(node, stream);
+    playing=true; setStatus('Tab audio capturing…');
   });
-$('btnTone').addEventListener('click', ()=>{
+
+  $('btnTone').addEventListener('click', ()=>{
     ensureAudio();
     const osc = audio.createOscillator(); const g = audio.createGain(); osc.type='sawtooth'; osc.frequency.value=120; g.gain.value=0.2; osc.connect(g).connect(master);
     const tee = audio.createGain(); g.connect(tee); setSourceNode(tee, null);
@@ -714,92 +703,6 @@ $('btnTone').addEventListener('click', ()=>{
     sctx.filter='none'; sctx.globalCompositeOperation='source-over';
   }
 
-  
-  // Deep randomizer helpers
-  const rpick = arr => arr[Math.floor(Math.random()*arr.length)];
-  const rng = (a,b)=> a + Math.random()*(b-a);
-  const rint = (a,b)=> Math.floor(rng(a,b+1));
-  function setVal(el, v){ if (!el) return; el.value = String(v); el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change')); }
-
-  function randomizeLayerPalettes(){
-    const opts = ['inherit','neon','fire','ocean','pastel','glacier','random','custom'];
-    const sels = [palSprites, palFlecks, palShapes, palBars, palRays];
-    sels.forEach(sel=>{
-      const pick = rpick(opts);
-      sel.value = pick;
-      if (pick==='custom'){
-        const rnd=()=> '#'+Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6,'0');
-        c1.value=rnd(); c2.value=rnd(); c3.value=rnd();
-        c1.dispatchEvent(new Event('input')); c2.dispatchEvent(new Event('input')); c3.dispatchEvent(new Event('input'));
-      }
-    });
-  }
-
-  function randomizeEverything(){
-    // Toggle layers (keep at least 4)
-    const keys = Object.keys(layers);
-    keys.forEach(k=> layers[k] = Math.random() < 0.6);
-    if (Object.values(layers).filter(Boolean).length < 4){
-      while (Object.values(layers).filter(Boolean).length < 4){
-        layers[rpick(keys)] = true;
-      }
-    }
-    // reflect buttons
-    (function sync(){ [...tbar.querySelectorAll('.tbtn')].forEach(btn=>{
-      const k=btn.dataset.layer; const on=!!layers[k];
-      btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', on?'true':'false');
-    }); })();
-
-    // Core audio + viz params
-    setVal(gain, rng(0.5, 3.5));
-    setVal(smooth, rng(0.0, 0.95));
-    const fftOpts=['512','1024','2048','4096','8192']; fftSel.value=rpick(fftOpts); fftSel.dispatchEvent(new Event('change'));
-    setVal(glow, rint(0, 12));
-    setVal(barsSlide, rint(12, 220));
-    bgmode.value = rpick(['black','gradient','plasma']);
-
-    // Kaleido
-    setVal(segments, rint(4, 24));
-    setVal(kAmt, rng(0, 1));
-    setVal(kRot, rng(-2, 2));
-    setVal(kWarp, rng(0, 1.2));
-
-    // Shader overlays (+ safe margin)
-    setVal(lensAmt, rng(0, 1.5));
-    setVal(rippleAmt, rng(0, 2));
-    setVal(liquidAmt, rng(0, 2));
-    setVal(safeMargin, rng(0.02, 0.22));
-
-    // Populations & dynamics
-    setVal(budget, rint(40, 160));
-    setVal(particlesCount, rint(100, 2400));
-    setVal(flecksCount, rint(50, 1300));
-    setVal(shapesRate, rng(0.2, 12.0));
-
-    // Jitter + drift (preserved, randomized because NOVA used them)
-    setVal(jitSprites, rng(0, 1.6));
-    setVal(jitFlecks, rng(0, 1.6));
-    setVal(jitShapes, rng(0, 1.6));
-    setVal(drift, rng(0.0, 1.4));
-
-    // Palettes (global + per-layer)
-    (function randomizePaletteGlobal(){
-      const choices=['neon','fire','ocean','pastel','glacier','random','custom'];
-      const pick = rpick(choices);
-      if (pick==='custom'){
-        const rnd=()=> '#'+Math.floor(Math.random()*0xFFFFFF).toString(16).padStart(6,'0');
-        c1.value=rnd(); c2.value=rnd(); c3.value=rnd();
-        c1.dispatchEvent(new Event('input')); c2.dispatchEvent(new Event('input')); c3.dispatchEvent(new Event('input'));
-      }
-      paletteSel.value = pick; globalPal = makePalette(paletteSel.value);
-    })();
-    randomizeLayerPalettes();
-
-    // Preset shuffle
-    const cycleList=['kaleido','bands','sprites','sunburst','osc','bars','flecks','shapes','mix'];
-    preset.value = rpick(cycleList);
-  }
-
   // RNG auto-cycle
   let lastPresetChange=performance.now();
   const cycleList=['kaleido','bands','sprites','sunburst','osc','bars','flecks','shapes','mix'];
@@ -821,7 +724,16 @@ $('btnTone').addEventListener('click', ()=>{
     anB.getByteFrequencyData(freqB);
     anC.getByteFrequencyData(freqC);
 
-    if (auto.value==='on'){ const now=performance.now(); const per=parseFloat(period.value)*1000; if (now-lastPresetChange>per){ lastPresetChange=now; randomizeEverything(); } } }
+    if (auto.value==='on'){
+      const now=performance.now();
+      const per = parseFloat(period.value) * 1000;
+      if (now-lastPresetChange>per){
+        lastPresetChange=now;
+        const idx = cycleList.indexOf(preset.value);
+        preset.value = cycleList[(idx+1) % cycleList.length];
+        randomizePalette();
+      }
+    }
 
     drawBG(sctx);
     if (layers.sprites) drawSprites(sctx);
@@ -861,7 +773,6 @@ $('btnTone').addEventListener('click', ()=>{
   });
   fftSel.addEventListener('change', ()=> setupAnalysers(parseInt(fftSel.value,10)) );
 
-  document.getElementById('btnRandom').addEventListener('click', ()=> randomizeEverything());
   function init(){
     doResize();
     setStatus('Pick a source: Mic/Loopback, Tab Capture, or File.');
